@@ -332,6 +332,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Fetch comments for listing posts (default: disabled to reduce API calls).",
     )
     parser.add_argument(
+        "--continue",
+        dest="resume",
+        action="store_true",
+        help=(
+            "Resume a previous run by reusing cached post_jsons files when present, skipping redundant fetches."
+        ),
+    )
+    parser.add_argument(
         "--delay",
         type=float,
         default=5.0,
@@ -485,6 +493,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         time_filter=args.time_filter,
         output_formats=output_formats,
         fetch_comments=args.fetch_comments,
+        resume=args.resume,
     )
 
     subreddit_sorts = _parse_csv(args.subreddit_sorts, default="top")

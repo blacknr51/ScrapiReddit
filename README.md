@@ -48,8 +48,12 @@ Common scenarios:
 	```powershell
 	python scrapi-reddit.py --post-url https://www.reddit.com/r/python/comments/xyz789/example_post/
 	```
+- Resume a long scrape after interruption:
+	```powershell
+	python scrapi-reddit.py python --fetch-comments --continue --output-format both
+	```
 
-Artifacts now default to `./scrapi-reddit-data` (or the path in `SCRAPI_REDDIT_OUTPUT_DIR`). Override with `--output-dir` if you prefer another location. Set `--output-format both` to persist CSV summaries alongside the raw JSON.
+Artifacts now default to `./scrapi_reddit_data` (or the path in `SCRAPI_REDDIT_OUTPUT_DIR`). Override with `--output-dir` if you prefer another location. Set `--output-format both` to persist CSV summaries alongside the raw JSON.
 
 `--limit` controls the total number of posts fetched per listing (defaults to 100, set `--limit 0` to fetch until the listing exhausts its `after` cursor). Comment requests default to `--comment-limit 250` (max 500 per fetch) and only run when `--fetch-comments` or `--post-url` is provided, keeping the scraper lightweight by default.
 
@@ -75,6 +79,7 @@ options = ScrapeOptions(
 		delay=2.0,
 		time_filter="day",
 		output_formats={"json", "csv"},
+		resume=False,
 )
 
 target = ListingTarget(

@@ -37,6 +37,7 @@ class ScrapeOptions:
     output_formats: set[str] = field(default_factory=lambda: {"json"})
     listing_page_size: int = LISTING_PAGE_SIZE
     fetch_comments: bool = False
+    resume: bool = False
 
     def __post_init__(self) -> None:
         if self.listing_limit is not None:
@@ -281,6 +282,43 @@ def extract_links(listing_json: dict) -> List[dict[str, Any]]:
             continue
         links.append(link_info)
     return links
+
+
+def _extract_post_data(post_json: Any) -> dict[str, Any] | None:
+    if isinstance(post_json, list) and post_json:
+        first = post_json[0]
+        if isinstance(first, dict):
+            children = first.get("data", {}).get("children", []) or []
+            if children:
+                maybe_post = children[0].get("data")
+                if isinstance(maybe_post, dict):
+                    return maybe_post
+    return None
+
+
+def _find_existing_post_json(posts_dir: Path, link_info: dict[str, Any]) -> Path | None:
+    if not posts_dir.exists():
+        return None
+    post_id = link_info.get("id")
+    if not post_id:
+        return None
+    matches = sorted(posts_dir.glob(f"*{post_id}*.json"))
+    if matches:
+        return matches[0]
+    return None
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    if "429" in message or "too many requests" in message or "rate limit" in message:
+        return True
+    if isinstance(exc, requests.HTTPError):
+        try:
+            status = exc.response.status_code if exc.response is not None else None
+        except Exception:  # pragma: no cover - defensive
+            status = None
+        return status == 429
+    return False
 
 
 def derive_filename(link_info: dict[str, Any], post_data: dict[str, Any] | None) -> str:
@@ -631,31 +669,76 @@ def process_listing(
         post_url = link_info.get("url")
         if not post_url:
             continue
+
         rank_label = link_info.get("rank")
         progress = f"{rank_label}/{total_links}" if rank_label else f"?/{total_links}"
-        params = {"raw_json": 1, "limit": options.comment_limit}
-        try:
-            post_json = fetch_json(session, post_url, params=params)
-        except Exception as exc:  # noqa: BLE001 - continue scraping other links
-            print(f"[WARN] Skipping post at {post_url} due to error: {exc}", file=sys.stderr)
-            time.sleep(options.delay)
+
+        cached_path: Path | None = None
+        post_json: Any | None = None
+        post_data: dict[str, Any] | None = None
+        reused = False
+
+        if options.resume:
+            cached_path = _find_existing_post_json(posts_dir, link_info)
+            if cached_path:
+                try:
+                    post_json = json.loads(cached_path.read_text(encoding="utf-8"))
+                    post_data = _extract_post_data(post_json) or {}
+                    reused = True
+                    if "json" not in options.output_formats:
+                        print(f"[{progress}] Using cached data for {post_url}")
+                except Exception as cache_exc:  # noqa: BLE001 - treat as cache miss
+                    print(
+                        f"[WARN] Failed to reuse cached post {cached_path}: {cache_exc}",
+                        file=sys.stderr,
+                    )
+                    post_json = None
+                    post_data = None
+                    cached_path = None
+
+        attempted_fetch = False
+        fetched_successfully = False
+
+        if post_json is None:
+            params = {"raw_json": 1, "limit": options.comment_limit}
+            wait_seconds = 60
+            while True:
+                attempted_fetch = True
+                try:
+                    post_json = fetch_json(session, post_url, params=params)
+                    fetched_successfully = True
+                    break
+                except Exception as exc:  # noqa: BLE001 - handle rate limit and continue
+                    if _is_rate_limit_error(exc):
+                        print(
+                            f"[WARN] Rate limited fetching {post_url}; waiting {wait_seconds} seconds before retrying.",
+                            file=sys.stderr,
+                        )
+                        time.sleep(wait_seconds)
+                        wait_seconds += 60
+                        continue
+                    print(f"[WARN] Skipping post at {post_url} due to error: {exc}", file=sys.stderr)
+                    post_json = None
+                    break
+
+        if post_json is None:
+            if attempted_fetch:
+                time.sleep(options.delay)
             continue
 
-        post_data = None
-        if isinstance(post_json, list) and post_json:
-            first = post_json[0]
-            if isinstance(first, dict):
-                children = first.get("data", {}).get("children", [])
-                if children:
-                    post_data = children[0].get("data")
+        post_data = post_data or _extract_post_data(post_json) or {}
+
+        target_path = cached_path or (posts_dir / derive_filename(link_info, post_data))
 
         if "json" in options.output_formats:
-            filename = derive_filename(link_info, post_data)
-            target_path = posts_dir / filename
-            print(f"[{progress}] Fetching {post_url} -> {target_path}")
-            save_json(post_json, target_path)
+            if reused and cached_path:
+                print(f"[{progress}] Cached post already stored at {target_path}")
+            else:
+                print(f"[{progress}] Fetching {post_url} -> {target_path}")
+                save_json(post_json, target_path)
         else:
-            print(f"[{progress}] Fetching {post_url}")
+            if not reused:
+                print(f"[{progress}] Fetching {post_url}")
 
         if "csv" in options.output_formats:
             post_record = flatten_post_record(target.resolved_context(), link_info, post_data)
@@ -671,7 +754,9 @@ def process_listing(
                     },
                 )
             )
-        time.sleep(options.delay)
+
+        if attempted_fetch and fetched_successfully:
+            time.sleep(options.delay)
 
     if "csv" in options.output_formats:
         posts_csv_path = base_dir / "posts.csv"
