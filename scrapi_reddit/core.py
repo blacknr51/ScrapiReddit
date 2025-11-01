@@ -1,6 +1,7 @@
 """Core scraping utilities for the Scrapi Reddit toolkit."""
 from __future__ import annotations
 
+import copy
 import csv
 import hashlib
 import json
@@ -19,7 +20,7 @@ DEFAULT_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 BASE_URL = "https://www.reddit.com"
-MAX_LISTING_LIMIT = 100
+LISTING_PAGE_SIZE = 100
 MAX_COMMENT_LIMIT = 500
 MIN_DELAY_SECONDS = 1.0
 
@@ -29,14 +30,19 @@ class ScrapeOptions:
     """Configuration shared by subreddit processing routines."""
 
     output_root: Path
-    listing_limit: int
+    listing_limit: int | None
     comment_limit: int
     delay: float
     time_filter: str
     output_formats: set[str] = field(default_factory=lambda: {"json"})
+    listing_page_size: int = LISTING_PAGE_SIZE
 
     def __post_init__(self) -> None:
-        self.listing_limit = max(1, min(self.listing_limit, MAX_LISTING_LIMIT))
+        if self.listing_limit is not None:
+            if self.listing_limit <= 0:
+                self.listing_limit = None
+            else:
+                self.listing_limit = max(1, self.listing_limit)
         self.comment_limit = max(1, min(self.comment_limit, MAX_COMMENT_LIMIT))
         self.delay = max(self.delay, MIN_DELAY_SECONDS)
         self.output_formats = set(self.output_formats)
@@ -47,6 +53,7 @@ class ScrapeOptions:
         allowed_formats = {"json", "csv"}
         if not self.output_formats.issubset(allowed_formats):
             raise ValueError(f"Unsupported output formats: {self.output_formats}")
+        self.listing_page_size = max(1, min(int(self.listing_page_size), LISTING_PAGE_SIZE))
 
 
 @dataclass(slots=True)
@@ -65,6 +72,95 @@ class ListingTarget:
 
     def resolved_context(self) -> str:
         return self.context or self.label
+
+
+def _determine_page_limit(
+    *,
+    target: ListingTarget,
+    options: ScrapeOptions,
+    fetched_count: int,
+) -> int | None:
+    if not target.allow_limit:
+        # Respect any explicit limit already present but don't override with defaults.
+        explicit = target.params.get("limit")
+        if explicit is None:
+            return None
+        try:
+            return max(1, min(int(explicit), LISTING_PAGE_SIZE))
+        except (TypeError, ValueError):
+            return LISTING_PAGE_SIZE
+
+    explicit_limit = target.params.get("limit")
+    page_size = options.listing_page_size
+    if explicit_limit is not None:
+        try:
+            page_size = max(1, min(int(explicit_limit), LISTING_PAGE_SIZE))
+        except (TypeError, ValueError):
+            page_size = options.listing_page_size
+
+    if options.listing_limit is None:
+        return page_size
+
+    remaining = max(options.listing_limit - fetched_count, 0)
+    if remaining == 0:
+        return 0
+
+    return max(1, min(page_size, remaining))
+
+
+def _fetch_listing(
+    session: requests.Session,
+    target: ListingTarget,
+    options: ScrapeOptions,
+) -> tuple[Any, list[Any], int]:
+    aggregated: Any | None = None
+    combined_children: list[Any] = []
+    cursor = target.params.get("after")
+    fetched = 0
+    pages = 0
+
+    while True:
+        if options.listing_limit is not None and fetched >= options.listing_limit:
+            break
+
+        params = dict(target.params)
+        params.setdefault("raw_json", 1)
+        page_limit = _determine_page_limit(target=target, options=options, fetched_count=fetched)
+        if page_limit is not None:
+            if page_limit == 0:
+                break
+            params["limit"] = page_limit
+        if cursor:
+            params["after"] = cursor
+
+        listing_json = fetch_json(session, target.url, params=params)
+        pages += 1
+
+        if aggregated is None:
+            aggregated = copy.deepcopy(listing_json)
+
+        if not isinstance(listing_json, dict):
+            break
+
+        data = listing_json.get("data", {})
+        children = data.get("children", []) or []
+        combined_children.extend(children)
+        fetched += len(children)
+
+        cursor = data.get("after")
+        if not cursor:
+            break
+
+    if aggregated is None or not isinstance(aggregated, dict):
+        aggregated = {"data": {}}
+
+    aggregated_data = aggregated.setdefault("data", {})
+    if options.listing_limit is not None and len(combined_children) > options.listing_limit:
+        combined_children = combined_children[: options.listing_limit]
+    aggregated_data["children"] = combined_children
+    aggregated_data["after"] = cursor
+
+    return aggregated, combined_children, pages
 
 def build_session(user_agent: str, verify: bool) -> requests.Session:
     session = requests.Session()
@@ -438,6 +534,8 @@ def rebuild_csv_from_cache(target: ListingTarget, output_root: Path) -> None:
         comments_csv_path,
     )
     print(f"Rebuilt CSV summaries for {target.label} at {posts_csv_path} and {comments_csv_path}")
+
+
 def process_listing(
     target: ListingTarget,
     *,
@@ -450,18 +548,16 @@ def process_listing(
     links_path = base_dir / "links.json"
     posts_dir = base_dir / "post_jsons"
 
-    listing_params = dict(target.params)
-    if target.allow_limit and "limit" not in listing_params:
-        listing_params["limit"] = options.listing_limit
-    listing_params.setdefault("raw_json", 1)
-    listing_json = fetch_json(session, target.url, params=listing_params)
+    listing_json, children, pages = _fetch_listing(session, target, options)
     if "json" in options.output_formats:
         save_json(listing_json, posts_path)
-        print(f"Saved listing to {posts_path}")
+        print(f"Saved listing to {posts_path} ({len(children)} items across {pages} page(s))")
     else:
-        print(f"Fetched listing for {target.label}")
+        print(f"Fetched listing for {target.label} ({len(children)} items, {pages} page(s))")
 
     links = extract_links(listing_json)
+    if options.listing_limit is not None:
+        links = links[: options.listing_limit]
     if "json" in options.output_formats:
         save_json(links, links_path)
         print(f"Saved {len(links)} links to {links_path}")

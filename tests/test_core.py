@@ -139,6 +139,19 @@ def test_scrape_options_enforces_bounds(tmp_path: Path):
         output_formats={"json"},
     )
 
-    assert options.listing_limit == 100
+    assert options.listing_limit == 1000
     assert options.comment_limit == 500
     assert options.delay >= 1.0
+    assert options.listing_page_size == 100
+
+    unlimited = ScrapeOptions(
+        output_root=tmp_path,
+        listing_limit=0,
+        comment_limit=250,
+        delay=2.0,
+        time_filter="day",
+        output_formats={"json"},
+    )
+
+    assert unlimited.listing_limit is None
+    assert unlimited.comment_limit == 250

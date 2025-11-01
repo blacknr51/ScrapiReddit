@@ -259,13 +259,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--limit",
         type=int,
         default=100,
-        help="Maximum number of posts to fetch from the listing (default: 100).",
+        help=(
+            "Maximum number of items to fetch per listing (total). Values above 100 trigger paginated "
+            "fetches; use 0 for no explicit cap (default: 100)."
+        ),
     )
     parser.add_argument(
         "--comment-limit",
         type=int,
-        default=500,
-        help="Maximum number of comments to retrieve per post (default: 500).",
+        default=250,
+        help="Comments per post request (default: 250, max: 500).",
     )
     parser.add_argument(
         "--delay",
