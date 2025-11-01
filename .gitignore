@@ -20,6 +20,6 @@ venv/
 .vscode/
 .idea/
 
-# Optional local scrape outputs
-# Uncomment if you point --output-dir at a path inside the repo
-# data/
+# Local scrape outputs
+scrapi_reddit_data/
+

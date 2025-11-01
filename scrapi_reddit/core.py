@@ -36,6 +36,7 @@ class ScrapeOptions:
     time_filter: str
     output_formats: set[str] = field(default_factory=lambda: {"json"})
     listing_page_size: int = LISTING_PAGE_SIZE
+    fetch_comments: bool = False
 
     def __post_init__(self) -> None:
         if self.listing_limit is not None:
@@ -72,6 +73,20 @@ class ListingTarget:
 
     def resolved_context(self) -> str:
         return self.context or self.label
+
+
+@dataclass(slots=True)
+class PostTarget:
+    """Represents a single post JSON endpoint to scrape."""
+
+    label: str
+    output_segments: tuple[str, ...]
+    url: str
+    params: dict[str, Any] = field(default_factory=dict)
+    context: str = ""
+
+    def output_dir(self, root: Path) -> Path:
+        return root.joinpath(*self.output_segments)
 
 
 def _determine_page_limit(
@@ -220,28 +235,51 @@ def fetch_json(
     raise RuntimeError(f"Failed to fetch {url!r}: {last_exc}") from last_exc
 
 
+def _build_link_info(child_data: dict[str, Any], *, rank: int) -> dict[str, Any] | None:
+    permalink = child_data.get("permalink")
+    if not permalink:
+        return None
+    permalink = str(permalink)
+    if not permalink.startswith("/"):
+        permalink = "/" + permalink
+    if not permalink.endswith("/"):
+        permalink = permalink + "/"
+
+    json_url = f"{BASE_URL}{permalink}.json"
+    post_url = f"{BASE_URL}{permalink}"
+    content_url = child_data.get("url_overridden_by_dest") or child_data.get("url") or post_url
+
+    link_info: dict[str, Any] = {
+        "rank": rank,
+        "id": child_data.get("id"),
+        "title": child_data.get("title"),
+        "created_utc": child_data.get("created_utc"),
+        "permalink": permalink,
+        "url": json_url,
+        "post_url": post_url,
+        "content_url": content_url,
+        "author": child_data.get("author"),
+        "author_fullname": child_data.get("author_fullname"),
+        "subreddit": child_data.get("subreddit"),
+        "score": child_data.get("score"),
+        "upvote_ratio": child_data.get("upvote_ratio"),
+        "num_comments": child_data.get("num_comments"),
+        "selftext": child_data.get("selftext"),
+        "link_flair_text": child_data.get("link_flair_text"),
+        "over_18": child_data.get("over_18"),
+    }
+    return link_info
+
+
 def extract_links(listing_json: dict) -> List[dict[str, Any]]:
     children = listing_json.get("data", {}).get("children", [])
     links: List[dict[str, Any]] = []
     for rank, child in enumerate(children, start=1):
         child_data = child.get("data", {})
-        permalink = child_data.get("permalink")
-        if not permalink:
+        link_info = _build_link_info(child_data, rank=rank)
+        if not link_info:
             continue
-        if not permalink.startswith("/"):
-            permalink = "/" + permalink
-        if not permalink.endswith("/"):
-            permalink = permalink + "/"
-        links.append(
-            {
-                "rank": rank,
-                "id": child_data.get("id"),
-                "title": child_data.get("title"),
-                "created_utc": child_data.get("created_utc"),
-                "permalink": permalink,
-                "url": f"{BASE_URL}{permalink}.json",
-            }
-        )
+        links.append(link_info)
     return links
 
 
@@ -325,20 +363,35 @@ def flatten_post_record(
         "rank": link_info.get("rank"),
         "post_id": post_data.get("id") or link_info.get("id"),
         "title": post_data.get("title") or link_info.get("title"),
-        "author": post_data.get("author") or post_data.get("author_fullname"),
+        "author": post_data.get("author")
+        or post_data.get("author_fullname")
+        or link_info.get("author")
+        or link_info.get("author_fullname"),
         "subreddit": post_data.get("subreddit") or subreddit,
         "created_utc": created_utc,
         "created_iso": format_timestamp(created_utc),
-        "score": post_data.get("score"),
-        "upvote_ratio": post_data.get("upvote_ratio"),
-        "num_comments": post_data.get("num_comments"),
+        "score": post_data.get("score") if post_data.get("score") is not None else link_info.get("score"),
+        "upvote_ratio": post_data.get("upvote_ratio")
+        if post_data.get("upvote_ratio") is not None
+        else link_info.get("upvote_ratio"),
+        "num_comments": post_data.get("num_comments")
+        if post_data.get("num_comments") is not None
+        else link_info.get("num_comments"),
         "permalink": permalink,
         "url": post_data.get("url_overridden_by_dest")
         or post_data.get("url")
+        or link_info.get("content_url")
+        or link_info.get("post_url")
         or link_info.get("url"),
-        "selftext": post_data.get("selftext"),
-        "link_flair_text": post_data.get("link_flair_text"),
-        "over_18": post_data.get("over_18"),
+        "selftext": post_data.get("selftext")
+        if post_data.get("selftext") is not None
+        else link_info.get("selftext"),
+        "link_flair_text": post_data.get("link_flair_text")
+        if post_data.get("link_flair_text") is not None
+        else link_info.get("link_flair_text"),
+        "over_18": post_data.get("over_18")
+        if post_data.get("over_18") is not None
+        else link_info.get("over_18"),
     }
 
 
@@ -452,7 +505,7 @@ def rebuild_csv_from_cache(target: ListingTarget, output_root: Path) -> None:
         post_id = str(post_data.get("id") or "").strip()
         link_info = link_map.get(post_id, {})
         if not link_info:
-            link_info = {
+            link_info = _build_link_info(post_data, rank=idx) or {
                 "rank": idx,
                 "id": post_data.get("id") or path.stem,
                 "title": post_data.get("title"),
@@ -569,6 +622,12 @@ def process_listing(
     comments_records: List[dict[str, Any]] = []
 
     for link_info in links:
+        if not options.fetch_comments:
+            if "csv" in options.output_formats:
+                post_record = flatten_post_record(target.resolved_context(), link_info, None)
+                posts_records.append(post_record)
+            continue
+
         post_url = link_info.get("url")
         if not post_url:
             continue
@@ -638,33 +697,142 @@ def process_listing(
             ],
             posts_csv_path,
         )
+        if options.fetch_comments:
+            write_csv(
+                comments_records,
+                [
+                    "post_id",
+                    "post_rank",
+                    "post_title",
+                    "subreddit",
+                    "comment_id",
+                    "parent_id",
+                    "author",
+                    "created_utc",
+                    "created_iso",
+                    "score",
+                    "depth",
+                    "body",
+                    "permalink",
+                    "is_submitter",
+                ],
+                comments_csv_path,
+            )
+            print(f"Wrote CSV summaries to {posts_csv_path} and {comments_csv_path}")
+        else:
+            print(f"Wrote CSV summary to {posts_csv_path}")
+
+
+def process_post(
+    target: PostTarget,
+    *,
+    session: requests.Session,
+    options: ScrapeOptions,
+) -> None:
+    print(f"\n=== Processing {target.label} ===")
+    base_dir = target.output_dir(options.output_root)
+    posts_dir = base_dir / "post_jsons"
+    links_path = base_dir / "links.json"
+
+    params = {"raw_json": 1, "limit": options.comment_limit}
+    params.update(target.params)
+    post_json = fetch_json(session, target.url, params=params)
+
+    post_data: dict[str, Any] | None = None
+    if isinstance(post_json, list) and post_json:
+        first = post_json[0]
+        if isinstance(first, dict):
+            children = first.get("data", {}).get("children", [])
+            if children:
+                maybe_post = children[0].get("data")
+                if isinstance(maybe_post, dict):
+                    post_data = maybe_post
+    if post_data is None:
+        post_data = {}
+
+    link_info = _build_link_info(post_data, rank=1) or {
+        "rank": 1,
+        "id": post_data.get("id"),
+        "title": post_data.get("title"),
+        "created_utc": post_data.get("created_utc"),
+        "permalink": post_data.get("permalink"),
+        "url": target.url,
+        "post_url": target.url,
+        "content_url": target.url,
+    }
+    links = [link_info]
+
+    if "json" in options.output_formats:
+        filename = derive_filename(link_info, post_data)
+        target_path = posts_dir / filename
+        print(f"Saving post JSON to {target_path}")
+        save_json(post_json, target_path)
+        save_json(links, links_path)
+    else:
+        print("Fetched post JSON")
+
+    post_record = flatten_post_record(target.context or link_info.get("subreddit") or "post", link_info, post_data)
+    comments_records = flatten_comments(
+        post_json,
+        {
+            "post_id": post_record.get("post_id"),
+            "rank": post_record.get("rank"),
+            "title": post_record.get("title"),
+            "subreddit": post_record.get("subreddit"),
+        },
+    )
+
+    if "csv" in options.output_formats:
+        posts_csv_path = base_dir / "posts.csv"
+        comments_csv_path = base_dir / "comments.csv"
         write_csv(
-            comments_records,
+            [post_record],
             [
+                "rank",
                 "post_id",
-                "post_rank",
-                "post_title",
-                "subreddit",
-                "comment_id",
-                "parent_id",
+                "title",
                 "author",
+                "subreddit",
                 "created_utc",
                 "created_iso",
                 "score",
-                "depth",
-                "body",
+                "upvote_ratio",
+                "num_comments",
                 "permalink",
-                "is_submitter",
+                "url",
+                "selftext",
+                "link_flair_text",
+                "over_18",
             ],
-            comments_csv_path,
+            posts_csv_path,
         )
-        print(f"Wrote CSV summaries to {posts_csv_path} and {comments_csv_path}")
-
-
+        if comments_records:
+            write_csv(
+                comments_records,
+                [
+                    "post_id",
+                    "post_rank",
+                    "post_title",
+                    "subreddit",
+                    "comment_id",
+                    "parent_id",
+                    "author",
+                    "created_utc",
+                    "created_iso",
+                    "score",
+                    "depth",
+                    "body",
+                    "permalink",
+                    "is_submitter",
+                ],
+                comments_csv_path,
+            )
+        print(f"Wrote outputs to {base_dir}")
 __all__ = [
     "BASE_URL",
     "DEFAULT_USER_AGENT",
     "ListingTarget",
+    "PostTarget",
     "ScrapeOptions",
     "build_session",
     "fetch_json",
@@ -674,6 +842,7 @@ __all__ = [
     "flatten_post_record",
     "format_timestamp",
     "process_listing",
+    "process_post",
     "rebuild_csv_from_cache",
     "save_json",
     "shorten_component",

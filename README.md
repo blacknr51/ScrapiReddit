@@ -40,10 +40,18 @@ Common scenarios:
 	```powershell
 	python scrapi-reddit.py --listing-url https://www.reddit.com/r/popular/best/.json?geo_filter=gb --listing-url https://www.reddit.com/r/all/.json
 	```
+- Opt-in comment fetching for listing runs:
+	```powershell
+	python scrapi-reddit.py python --fetch-comments --comment-limit 100 --output-format both
+	```
+- Single post (including full comment tree):
+	```powershell
+	python scrapi-reddit.py --post-url https://www.reddit.com/r/python/comments/xyz789/example_post/
+	```
 
-All artifacts default to an OS-specific cache directory (e.g. `%LOCALAPPDATA%\ScrapiReddit\data` on Windows). Override with `--output-dir` if you prefer another location. Set `--output-format both` to persist CSV summaries alongside the raw JSON.
+Artifacts now default to `./scrapi-reddit-data` (or the path in `SCRAPI_REDDIT_OUTPUT_DIR`). Override with `--output-dir` if you prefer another location. Set `--output-format both` to persist CSV summaries alongside the raw JSON.
 
-`--limit` controls the total number of posts fetched per listing (defaults to 100, set `--limit 0` to fetch until the listing exhausts its `after` cursor). Comment requests default to `--comment-limit 250` (max 500 per fetch).
+`--limit` controls the total number of posts fetched per listing (defaults to 100, set `--limit 0` to fetch until the listing exhausts its `after` cursor). Comment requests default to `--comment-limit 250` (max 500 per fetch) and only run when `--fetch-comments` or `--post-url` is provided, keeping the scraper lightweight by default.
 
 ## Python API
 
@@ -52,9 +60,11 @@ from pathlib import Path
 
 from scrapi_reddit import (
 		ListingTarget,
+		PostTarget,
 		ScrapeOptions,
 		build_session,
 		process_listing,
+		process_post,
 )
 
 session = build_session("my-user-agent", verify=True)
@@ -76,6 +86,14 @@ target = ListingTarget(
 )
 
 process_listing(target, session=session, options=options)
+
+post_target = PostTarget(
+	label="example post",
+	output_segments=("posts", "python", "xyz789"),
+	url="https://www.reddit.com/r/python/comments/xyz789/example_post/.json",
+)
+
+process_post(post_target, session=session, options=options)
 ```
 
 ## Testing

@@ -3,6 +3,7 @@ from .core import (
     BASE_URL,
     DEFAULT_USER_AGENT,
     ListingTarget,
+    PostTarget,
     ScrapeOptions,
     build_session,
     extract_links,
@@ -11,6 +12,7 @@ from .core import (
     flatten_post_record,
     format_timestamp,
     process_listing,
+    process_post,
     rebuild_csv_from_cache,
     shorten_component,
 )
@@ -19,6 +21,7 @@ __all__ = [
     "BASE_URL",
     "DEFAULT_USER_AGENT",
     "ListingTarget",
+    "PostTarget",
     "ScrapeOptions",
     "build_session",
     "extract_links",
@@ -27,6 +30,7 @@ __all__ = [
     "flatten_post_record",
     "format_timestamp",
     "process_listing",
+    "process_post",
     "rebuild_csv_from_cache",
     "shorten_component",
 ]
