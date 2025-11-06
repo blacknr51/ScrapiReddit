@@ -1,0 +1,7 @@
+users = ["spez", "reddit"]
+user_sections = "overview,submitted,comments"
+user_sorts = "new,top"
+limit = 200
+fetch_comments = false
+output_format = "csv"
+resume = true

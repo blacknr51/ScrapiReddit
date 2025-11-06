@@ -1,0 +1,9 @@
+popular = true
+popular_sorts = "top,hot"
+popular_top_times = "day,week"
+popular_geo = ["us", "gb", "in"]
+popular_geo_sorts = "top,hot"
+limit = 100
+fetch_comments = false
+output_format = "json"
+log_level = "INFO"

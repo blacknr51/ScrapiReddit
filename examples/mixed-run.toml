@@ -1,0 +1,14 @@
+subreddits = ["datascience"]
+subreddit_sorts = "top"
+subreddit_top_times = "day"
+search_queries = ["python asyncio"]
+search_types = ["post", "comment"]
+search_sort = "new"
+listing_url = ["https://www.reddit.com/r/MachineLearning/new/.json?limit=100"]
+post_url = ["https://www.reddit.com/r/Python/comments/xyz789/example_post/"]
+fetch_comments = true
+download_media = true
+media_filter = "image,video"
+limit = 120
+output_format = "both"
+resume = true

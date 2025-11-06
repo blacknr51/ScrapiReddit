@@ -1,0 +1,10 @@
+subreddits = ["python", "learnpython"]
+subreddit_sorts = "top,hot"
+subreddit_top_times = "day,week"
+limit = 150
+fetch_comments = true
+comment_limit = 250
+output_format = "both"
+download_media = false
+resume = true
+log_level = "INFO"

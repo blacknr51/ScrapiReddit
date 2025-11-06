@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scrapi-reddit"
-version = "0.1.0"
+version = "0.2.1"
 description = "Zero-auth Reddit scraper CLI and library"
 readme = "README.md"
 authors = [{ name = "Rodney Keilson" }]
@@ -12,6 +12,7 @@ license = "MIT"
 requires-python = ">=3.9"
 dependencies = [
     "requests>=2.31",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.urls]

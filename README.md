@@ -1,5 +1,7 @@
 # Scrapi Reddit
 
+[![CI](https://github.com/rodneykeilson/ScrapiReddit/actions/workflows/ci.yml/badge.svg)](https://github.com/rodneykeilson/ScrapiReddit/actions/workflows/ci.yml)
+
 Scrapi Reddit is a zero-auth toolkit for scraping public Reddit listings. Use the CLI for quick data pulls or import the library to integrate pagination, comment harvesting, and CSV exports into your own workflows. This scraper fetches data from Reddit's Public API and does not require any API key.
 
 ## Features
@@ -11,7 +13,7 @@ Scrapi Reddit is a zero-auth toolkit for scraping public Reddit listings. Use th
 - **Media archiving:** Optional media capture downloads linked images, GIFs, and videos alongside post metadata.
 - **Media filters:** Media filters let you keep only the assets you need (e.g., videos only or static images only).
 - **Flexible exports:** Save outputs as JSON and optionally flatten posts/comments into CSV for downstream analysis.
-- **Scriptable tooling:** Configurable CLI plus Python API for scripting and integration.
+- **Scriptable tooling:** Configurable CLI (config files + wizard) alongside a Python API for scripting and integration.
 
 ## Important Notes
 - Respect Reddit's [User Agreement](https://www.redditinc.com/policies/user-agreement) and local laws. Scraped data may have legal or ethical constraints.
@@ -43,6 +45,8 @@ This command downloads up to 200 posts from r/python, fetches comments (up to 50
 - `--download-media` Save linked images/GIFs/videos under each target's media directory.
 - `--popular --popular-geo <region-code>` Pull popular listings with geo filters.
 - `--user <name>` Scrape user overview/submitted/comments sections.
+- `--config scrape.toml` Load defaults from a TOML file (see `examples/` for ready-made templates; CLI flags override values inside the file).
+- `--wizard` Launch an interactive prompt that writes reusable configs or runs immediately.
 
 ### Advanced CLI Examples
 Fetch multiple subreddits with varied sorts and time windows, downloading all fetched media:
@@ -129,6 +133,13 @@ process_post(post_target, session=session, options=options)
 ```
 Both helpers write JSON/CSV to the configured output directory and emit progress via logging.
 When `download_media=True` (or `--download-media` on the CLI) any discoverable images, GIFs, and videos are saved under a `media/` directory per target. Media is organized by the item that produced it: `media/posts/<format>/` for post attachments and (when comment scraping is enabled) `media/comments/<format>/` for comment attachments. Formats include `mp4`, `webm`, `gif`, `jpg`, and `png`; additional extensions fall back to an `other/` directory. Reddit preview URLs occasionally expire, so you may see warning logs for 404 responses when older links have been removed.
+
+## Documentation
+- [API Reference](docs/API_REFERENCE.md)
+- [Configuration & Wizard Guide](docs/CONFIGURATION.md)
+- [Error Handling & Edge Cases](docs/ERROR_HANDLING.md)
+- [Sample Workflows](docs/WORKFLOWS.md)
+- [Example Configs](examples/README.md)
 
 ## Contributing
 Bug reports and pull requests are welcome. For feature requests or questions, please open an issue. When contributing, add tests that cover new behavior and ensure `python -m pytest` passes before submitting a PR.

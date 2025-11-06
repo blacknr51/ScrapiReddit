@@ -1,0 +1,10 @@
+search_queries = ["chatgpt", "openai"]
+search_types = ["post", "comment"]
+search_sort = "top"
+search_time = "week"
+limit = 100
+fetch_comments = true
+comment_limit = 200
+download_media = true
+media_filter = "video,gif"
+output_format = "both"

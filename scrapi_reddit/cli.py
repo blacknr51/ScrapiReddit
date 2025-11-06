@@ -7,8 +7,16 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import List, Sequence
+from typing import Any, Dict, List, Sequence
 from urllib.parse import parse_qsl, urlsplit
+
+try:  # pragma: no cover - dependency import paths
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    try:
+        import tomli as tomllib  # type: ignore[assignment]
+    except ModuleNotFoundError:  # pragma: no cover
+        tomllib = None  # type: ignore[assignment]
 
 from .core import (
     BASE_URL,
@@ -42,11 +50,26 @@ def _resolve_subreddits(args_subreddits: Sequence[str], prompt: bool) -> List[st
     return []
 
 
-def _parse_csv(value: str, *, default: str | None = None) -> List[str]:
+def _parse_csv(
+    value: str | Sequence[str] | None,
+    *,
+    default: str | Sequence[str] | None = None,
+) -> List[str]:
     raw = value if value is not None else default
-    if not raw:
+    if raw is None or raw == "":
         return []
-    return [item.strip() for item in raw.split(",") if item.strip()]
+    if isinstance(raw, str):
+        items = raw.split(",")
+    elif isinstance(raw, Sequence):
+        items = raw
+    else:
+        raise SystemExit("Expected string or sequence when parsing comma-separated values.")
+    result: List[str] = []
+    for item in items:
+        trimmed = str(item).strip()
+        if trimmed:
+            result.append(trimmed)
+    return result
 
 
 def _validate_choices(values: List[str], allowed: set[str], option_name: str) -> None:
@@ -60,6 +83,198 @@ def _slugify(text: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9_-]+", "_", text.strip())
     return slug or "item"
 
+
+_PATH_FIELDS = {"output_dir"}
+_LIST_FIELDS = {
+    "subreddits",
+    "users",
+    "listing_url",
+    "post_url",
+    "search_queries",
+    "search_types",
+    "popular_sorts",
+    "popular_top_times",
+    "popular_geo",
+    "popular_geo_sorts",
+    "subreddit_sorts",
+    "subreddit_top_times",
+    "user_sections",
+    "user_sorts",
+}
+
+
+def _prepare_config_value(key: str, value: Any) -> Any:
+    if value is None:
+        return None
+    if key in _PATH_FIELDS and isinstance(value, str):
+        return Path(value).expanduser().resolve()
+    if key in _LIST_FIELDS and isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return value
+
+
+def _load_config_data(path: Path) -> Dict[str, Any]:
+    if tomllib is None:
+        raise SystemExit("TOML support requires Python 3.11+ (or install tomli).")
+    try:
+        with path.expanduser().open("rb") as fp:
+            data = tomllib.load(fp)
+    except FileNotFoundError as exc:  # pragma: no cover - user error path
+        raise SystemExit(f"Configuration file not found: {path}") from exc
+    if not isinstance(data, dict):
+        raise SystemExit("Configuration file must contain a TOML table at the root.")
+    return {key: _prepare_config_value(key, value) for key, value in data.items()}
+
+
+def _update_namespace(
+    args: argparse.Namespace,
+    data: Dict[str, Any],
+    *,
+    defaults: argparse.Namespace | None = None,
+    only_if_default: bool = False,
+) -> None:
+    for key, value in data.items():
+        if value is None or not hasattr(args, key):
+            continue
+        if only_if_default and defaults is not None:
+            if getattr(args, key) != getattr(defaults, key, None):
+                continue
+        setattr(args, key, value)
+
+
+def _toml_repr(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, (list, tuple)):
+        items = ", ".join(_toml_repr(item) for item in value)
+        return f"[{items}]"
+    raise ValueError(f"Unsupported config value type: {type(value)!r}")
+
+
+def _dump_toml_lines(data: Dict[str, Any]) -> str:
+    lines: List[str] = []
+    for key in sorted(data.keys()):
+        value = data[key]
+        if value is None:
+            continue
+        lines.append(f"{key} = {_toml_repr(value)}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _prompt_bool(prompt: str, default: bool = False) -> bool:
+    suffix = "[Y/n]" if default else "[y/N]"
+    while True:
+        raw = input(f"{prompt} {suffix}: ").strip().lower()
+        if not raw:
+            return default
+        if raw in {"y", "yes"}:
+            return True
+        if raw in {"n", "no"}:
+            return False
+        print("Please enter 'y' or 'n'.")
+
+
+def _prompt_comma_list(prompt: str) -> List[str]:
+    raw = input(f"{prompt}: ").strip()
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _prompt_choice(prompt: str, choices: List[str], default: str) -> str:
+    choice_str = ", ".join(choices)
+    default_lower = default.lower()
+    while True:
+        raw = input(f"{prompt} ({choice_str}) [default: {default_lower}]: ").strip().lower()
+        if not raw:
+            return default_lower
+        if raw in choices:
+            return raw
+        print(f"Choose one of: {choice_str}.")
+
+
+def _prompt_int(prompt: str, default: int | None = None, minimum: int = 1, maximum: int | None = None) -> int:
+    while True:
+        raw = input(f"{prompt}{' [default: ' + str(default) + ']' if default is not None else ''}: ").strip()
+        if not raw and default is not None:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            print("Enter a valid integer.")
+            continue
+        if value < minimum:
+            print(f"Value must be >= {minimum}.")
+            continue
+        if maximum is not None and value > maximum:
+            print(f"Value must be <= {maximum}.")
+            continue
+        return value
+
+
+def _run_wizard() -> Dict[str, Any]:
+    print("Scrapi Reddit Wizard\n=====================")
+    print("This guided mode will collect the most common options and build a scrape configuration.\n")
+
+    mode = _prompt_choice("Choose scrape mode", ["listing", "search"], default="listing")
+    answers: Dict[str, Any] = {}
+
+    if mode == "listing":
+        subreddits = _prompt_comma_list("Enter subreddit names (comma-separated)")
+        answers["subreddits"] = subreddits
+        sorts = _prompt_comma_list("Listing sorts (comma, e.g. top,hot)") or ["top"]
+        answers["subreddit_sorts"] = ",".join(sorts)
+        if "top" in [s.lower() for s in sorts]:
+            top_times = _prompt_comma_list("Time filters for 'top' (hour,day,week,month,year,all)")
+            if top_times:
+                answers["subreddit_top_times"] = ",".join(top_times)
+        if _prompt_bool("Should I include the front page?", False):
+            answers["frontpage"] = True
+        if _prompt_bool("Include r/all?", False):
+            answers["include_r_all"] = True
+        if _prompt_bool("Include r/popular listings?", False):
+            answers["popular"] = True
+    else:
+        query = input("Enter search keywords: ").strip()
+        if not query:
+            raise SystemExit("Search mode requires a non-empty query.")
+        answers["search_queries"] = [query]
+        types = _prompt_comma_list("Search types (post,comment,sr,user,media)")
+        if types:
+            answers["search_types"] = types
+        sort = _prompt_choice("Search sort", ["relevance", "hot", "top", "new", "comments"], default="relevance")
+        answers["search_sort"] = sort
+        time_filter = _prompt_choice("Search time filter", ["all", "day", "week", "month", "year"], default="all")
+        answers["search_time"] = time_filter
+        sub = input("Restrict to subreddit (leave blank for site-wide): ").strip()
+        if sub:
+            answers["search_subreddit"] = sub
+            answers["search_restrict_sr"] = _prompt_bool("Restrict results to that subreddit?", True)
+        answers["search_include_over_18"] = _prompt_bool("Include over_18 results?", False)
+
+    answers["limit"] = _prompt_int("Listing/search limit (1-100)", default=100, minimum=1, maximum=100)
+    answers["fetch_comments"] = _prompt_bool("Fetch comments for every post?", True)
+    answers["comment_limit"] = _prompt_int("Comment limit per post (max 500)", default=250, minimum=1, maximum=500)
+    answers["download_media"] = _prompt_bool("Download media attachments?", False)
+    media_filter = input("Media filters (comma-separated, blank for all allowed): ").strip()
+    if media_filter:
+        answers["media_filter"] = media_filter
+    output_choice = _prompt_choice("Output format", ["json", "csv", "both"], default="json")
+    answers["output_format"] = output_choice
+
+    if _prompt_bool("Save these answers to a TOML file for reuse?", False):
+        path_str = input("Config file path [default: scrape.toml]: ").strip() or "scrape.toml"
+        path = Path(path_str).expanduser()
+        with path.open("w", encoding="utf-8") as fp:
+            fp.write(_dump_toml_lines({k: v for k, v in answers.items() if v}))
+        print(f"Saved configuration to {path}.")
+
+    return answers
 
 def _target_from_url(url: str) -> ListingTarget:
     parsed = urlsplit(url)
@@ -298,6 +513,12 @@ def _build_targets(
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", type=Path)
+    config_ns, remaining = config_parser.parse_known_args(raw_argv)
+
     parser = argparse.ArgumentParser(
         description=(
             "Scrape Reddit listings for one or more subreddits. Respect Reddit rate limits; "
@@ -444,6 +665,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Before cursor for reverse pagination of a search (optional).",
     )
     parser.add_argument(
+        "--wizard",
+        action="store_true",
+        help="Launch an interactive wizard to collect common settings.",
+    )
+    parser.add_argument(
         "--insecure",
         action="store_true",
         help="Disable TLS certificate verification (only if you trust the network).",
@@ -546,11 +772,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
         help="Logging verbosity (default: INFO).",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to a TOML configuration file whose values populate missing CLI options.",
+    )
+
+    defaults = parser.parse_args([])
+    args = parser.parse_args(remaining)
+    args.config = config_ns.config or args.config
+
+    if args.config is not None:
+        config_data = _load_config_data(args.config)
+        _update_namespace(args, config_data, defaults=defaults, only_if_default=True)
+
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.wizard:
+        wizard_answers = {
+            key: _prepare_config_value(key, value)
+            for key, value in _run_wizard().items()
+        }
+        _update_namespace(args, wizard_answers, only_if_default=False)
     subreddits = _resolve_subreddits(args.subreddits, args.prompt)
 
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
