@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import re
 import sys
@@ -463,9 +464,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Root directory where scrape artifacts are saved. Defaults to an OS-specific cache "
-            "folder (e.g. %%LOCALAPPDATA%%/ScrapiReddit/data on Windows)."
+            "Root directory where scrape artifacts are saved. Defaults to ./scrapi_reddit_data "
+            "(override with SCRAPI_REDDIT_OUTPUT_DIR)."
         ),
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Logging verbosity (default: INFO).",
     )
     return parser.parse_args(argv)
 
@@ -473,6 +480,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     subreddits = _resolve_subreddits(args.subreddits, args.prompt)
+
+    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     output_formats: set[str]
     if args.output_format == "both":

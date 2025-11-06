@@ -17,6 +17,8 @@ from .core import (
     shorten_component,
 )
 
+__version__ = "0.1.0"
+
 __all__ = [
     "BASE_URL",
     "DEFAULT_USER_AGENT",
@@ -33,4 +35,5 @@ __all__ = [
     "process_post",
     "rebuild_csv_from_cache",
     "shorten_component",
+    "__version__",
 ]

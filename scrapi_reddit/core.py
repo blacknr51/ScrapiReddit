@@ -5,6 +5,7 @@ import copy
 import csv
 import hashlib
 import json
+import logging
 import re
 import sys
 import time
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Any, Iterable, List
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -205,37 +208,76 @@ def fetch_json(
     backoff: float = 1.0,
 ) -> Any:
     last_exc: Exception | None = None
-    for attempt in range(1, retries + 1):
+    attempt = 0
+    wait_seconds = 60
+    while attempt < retries:
         try:
             response = session.get(url, params=params, timeout=30)
-            if response.status_code == 429:
-                last_exc = RuntimeError("HTTP 429 Too Many Requests")
-                retry_after_header = response.headers.get("Retry-After")
-                if retry_after_header:
-                    try:
-                        wait_time = float(retry_after_header)
-                    except ValueError:
-                        wait_time = backoff * (2 ** (attempt - 1))
-                else:
-                    wait_time = backoff * (2 ** (attempt - 1))
-                time.sleep(wait_time)
-                continue
-            response.raise_for_status()
-            try:
-                return response.json()
-            except ValueError as exc:
-                last_exc = exc
-                if attempt == retries:
-                    break
-                wait_time = backoff * (2 ** (attempt - 1))
-                time.sleep(wait_time)
-                continue
         except requests.exceptions.RequestException as exc:
+            attempt += 1
             last_exc = exc
-            if attempt == retries:
+            if attempt >= retries:
                 break
             wait_time = backoff * (2 ** (attempt - 1))
+            logger.warning(
+                "Request error fetching %s (attempt %d/%d): %s; retrying in %.1f seconds",
+                url,
+                attempt,
+                retries,
+                exc,
+                wait_time,
+            )
             time.sleep(wait_time)
+            continue
+
+        if response.status_code == 429:
+            last_exc = RuntimeError("HTTP 429 Too Many Requests")
+            logger.warning(
+                "Rate limited fetching %s; waiting %d seconds before retrying.",
+                url,
+                wait_seconds,
+            )
+            time.sleep(wait_seconds)
+            wait_seconds += 60
+            continue
+
+        attempt += 1
+
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            last_exc = exc
+            if attempt >= retries:
+                break
+            wait_time = backoff * (2 ** (attempt - 1))
+            logger.warning(
+                "HTTP error fetching %s (attempt %d/%d): %s; retrying in %.1f seconds",
+                url,
+                attempt,
+                retries,
+                exc,
+                wait_time,
+            )
+            time.sleep(wait_time)
+            continue
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            last_exc = exc
+            if attempt >= retries:
+                break
+            wait_time = backoff * (2 ** (attempt - 1))
+            logger.warning(
+                "Failed to decode JSON from %s (attempt %d/%d): %s; retrying in %.1f seconds",
+                url,
+                attempt,
+                retries,
+                exc,
+                wait_time,
+            )
+            time.sleep(wait_time)
+            continue
     raise RuntimeError(f"Failed to fetch {url!r}: {last_exc}") from last_exc
 
 
@@ -511,7 +553,7 @@ def rebuild_csv_from_cache(target: ListingTarget, output_root: Path) -> None:
         try:
             links = json.loads(links_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            print(f"[WARN] Failed to parse {links_path}: {exc}. Continuing without link metadata.")
+            logger.warning("Failed to parse %s: %s. Continuing without link metadata.", links_path, exc)
 
     link_map: dict[str, dict[str, Any]] = {}
     for entry in links:
@@ -528,7 +570,7 @@ def rebuild_csv_from_cache(target: ListingTarget, output_root: Path) -> None:
         try:
             post_json = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            print(f"[WARN] Skipping {path.name}: invalid JSON ({exc})")
+            logger.warning("Skipping %s: invalid JSON (%s)", path.name, exc)
             continue
 
         post_data: dict[str, Any] | None = None
@@ -573,7 +615,7 @@ def rebuild_csv_from_cache(target: ListingTarget, output_root: Path) -> None:
         )
 
     if not posts_records:
-        print(f"[WARN] No posts reconstructed for {target.label}")
+        logger.warning("No posts reconstructed for %s", target.label)
         return
 
     def _rank_key(value: Any) -> float:
@@ -627,7 +669,12 @@ def rebuild_csv_from_cache(target: ListingTarget, output_root: Path) -> None:
         ],
         comments_csv_path,
     )
-    print(f"Rebuilt CSV summaries for {target.label} at {posts_csv_path} and {comments_csv_path}")
+    logger.info(
+        "Rebuilt CSV summaries for %s at %s and %s",
+        target.label,
+        posts_csv_path,
+        comments_csv_path,
+    )
 
 
 def process_listing(
@@ -636,7 +683,7 @@ def process_listing(
     session: requests.Session,
     options: ScrapeOptions,
 ) -> None:
-    print(f"\n=== Processing {target.label} ===")
+    logger.info("=== Processing %s ===", target.label)
     base_dir = target.output_dir(options.output_root)
     posts_path = base_dir / "posts.json"
     links_path = base_dir / "links.json"
@@ -645,22 +692,36 @@ def process_listing(
     listing_json, children, pages = _fetch_listing(session, target, options)
     if "json" in options.output_formats:
         save_json(listing_json, posts_path)
-        print(f"Saved listing to {posts_path} ({len(children)} items across {pages} page(s))")
+        logger.info(
+            "Saved listing to %s (%d items across %d page(s))",
+            posts_path,
+            len(children),
+            pages,
+        )
     else:
-        print(f"Fetched listing for {target.label} ({len(children)} items, {pages} page(s))")
+        logger.info(
+            "Fetched listing for %s (%d items, %d page(s))",
+            target.label,
+            len(children),
+            pages,
+        )
 
     links = extract_links(listing_json)
     if options.listing_limit is not None:
         links = links[: options.listing_limit]
     if "json" in options.output_formats:
         save_json(links, links_path)
-        print(f"Saved {len(links)} links to {links_path}")
+        logger.info("Saved %d links to %s", len(links), links_path)
     else:
-        print(f"Extracted {len(links)} post permalinks")
+        logger.info("Extracted %d post permalinks", len(links))
 
     total_links = len(links)
     posts_records: List[dict[str, Any]] = []
     comments_records: List[dict[str, Any]] = []
+    fetched_count = 0
+    reused_count = 0
+    skipped_count = 0
+    rate_limit_events = 0
 
     for link_info in links:
         if not options.fetch_comments:
@@ -689,11 +750,12 @@ def process_listing(
                     post_data = _extract_post_data(post_json) or {}
                     reused = True
                     if "json" not in options.output_formats:
-                        print(f"[{progress}] Using cached data for {post_url}")
+                        logger.info("[%s] Using cached data for %s", progress, post_url)
                 except Exception as cache_exc:  # noqa: BLE001 - treat as cache miss
-                    print(
-                        f"[WARN] Failed to reuse cached post {cached_path}: {cache_exc}",
-                        file=sys.stderr,
+                    logger.warning(
+                        "Failed to reuse cached post %s: %s",
+                        cached_path,
+                        cache_exc,
                     )
                     post_json = None
                     post_data = None
@@ -713,20 +775,23 @@ def process_listing(
                     break
                 except Exception as exc:  # noqa: BLE001 - handle rate limit and continue
                     if _is_rate_limit_error(exc):
-                        print(
-                            f"[WARN] Rate limited fetching {post_url}; waiting {wait_seconds} seconds before retrying.",
-                            file=sys.stderr,
+                        rate_limit_events += 1
+                        logger.warning(
+                            "Rate limited fetching %s; waiting %d seconds before retrying.",
+                            post_url,
+                            wait_seconds,
                         )
                         time.sleep(wait_seconds)
                         wait_seconds += 60
                         continue
-                    print(f"[WARN] Skipping post at {post_url} due to error: {exc}", file=sys.stderr)
+                    logger.warning("Skipping post at %s due to error: %s", post_url, exc)
                     post_json = None
                     break
 
         if post_json is None:
             if attempted_fetch:
                 time.sleep(options.delay)
+                skipped_count += 1
             continue
 
         post_data = post_data or _extract_post_data(post_json) or {}
@@ -735,13 +800,13 @@ def process_listing(
 
         if "json" in options.output_formats:
             if reused and cached_path:
-                print(f"[{progress}] Cached post already stored at {target_path}")
+                logger.info("[%s] Cached post already stored at %s", progress, target_path)
             else:
-                print(f"[{progress}] Fetching {post_url} -> {target_path}")
+                logger.info("[%s] Fetching %s -> %s", progress, post_url, target_path)
                 save_json(post_json, target_path)
         else:
             if not reused:
-                print(f"[{progress}] Fetching {post_url}")
+                logger.info("[%s] Fetching %s", progress, post_url)
 
         if "csv" in options.output_formats:
             post_record = flatten_post_record(target.resolved_context(), link_info, post_data)
@@ -758,7 +823,11 @@ def process_listing(
                 )
             )
 
+        if reused:
+            reused_count += 1
+
         if attempted_fetch and fetched_successfully:
+            fetched_count += 1
             time.sleep(options.delay)
 
     if "csv" in options.output_formats:
@@ -806,9 +875,24 @@ def process_listing(
                 ],
                 comments_csv_path,
             )
-            print(f"Wrote CSV summaries to {posts_csv_path} and {comments_csv_path}")
+            logger.info(
+                "Wrote CSV summaries to %s and %s",
+                posts_csv_path,
+                comments_csv_path,
+            )
         else:
-            print(f"Wrote CSV summary to {posts_csv_path}")
+            logger.info("Wrote CSV summary to %s", posts_csv_path)
+
+    logger.info(
+        "Completed %s: total=%d fetched=%d reused=%d skipped=%d rate-limit-waits=%d comments=%d",
+        target.label,
+        total_links,
+        fetched_count,
+        reused_count,
+        skipped_count,
+        rate_limit_events,
+        len(comments_records),
+    )
 
 
 def process_post(
@@ -817,7 +901,7 @@ def process_post(
     session: requests.Session,
     options: ScrapeOptions,
 ) -> None:
-    print(f"\n=== Processing {target.label} ===")
+    logger.info("=== Processing %s ===", target.label)
     base_dir = target.output_dir(options.output_root)
     posts_dir = base_dir / "post_jsons"
     links_path = base_dir / "links.json"
@@ -853,11 +937,11 @@ def process_post(
     if "json" in options.output_formats:
         filename = derive_filename(link_info, post_data)
         target_path = posts_dir / filename
-        print(f"Saving post JSON to {target_path}")
+        logger.info("Saving post JSON to %s", target_path)
         save_json(post_json, target_path)
         save_json(links, links_path)
     else:
-        print("Fetched post JSON")
+        logger.info("Fetched post JSON")
 
     post_record = flatten_post_record(target.context or link_info.get("subreddit") or "post", link_info, post_data)
     comments_records = flatten_comments(
@@ -915,7 +999,11 @@ def process_post(
                 ],
                 comments_csv_path,
             )
-        print(f"Wrote outputs to {base_dir}")
+        logger.info(
+            "Wrote outputs to %s (comments=%d)",
+            base_dir,
+            len(comments_records),
+        )
 __all__ = [
     "BASE_URL",
     "DEFAULT_USER_AGENT",

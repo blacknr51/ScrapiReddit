@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import scrapi_reddit.core as core
 from scrapi_reddit.core import (
     BASE_URL,
     ListingTarget,
@@ -155,3 +156,185 @@ def test_scrape_options_enforces_bounds(tmp_path: Path):
 
     assert unlimited.listing_limit is None
     assert unlimited.comment_limit == 250
+
+    zero_comment = ScrapeOptions(
+        output_root=tmp_path,
+        listing_limit=10,
+        comment_limit=0,
+        delay=2.0,
+        time_filter="day",
+        output_formats={"json"},
+    )
+
+    assert zero_comment.comment_limit == 500
+
+
+def test_process_listing_resume_skips_fetch(tmp_path: Path, monkeypatch) -> None:
+    subreddit = "example"
+    target = ListingTarget(
+        label="r/example top (day)",
+        output_segments=("subreddits", "example", "top_day"),
+        url=f"{BASE_URL}/r/{subreddit}/top/.json",
+        params={"t": "day"},
+        context=subreddit,
+    )
+
+    base_dir = target.output_dir(tmp_path)
+    posts_dir = base_dir / "post_jsons"
+    posts_dir.mkdir(parents=True)
+
+    listing_json = {
+        "data": {
+            "children": [
+                {
+                    "data": {
+                        "id": "pq1",
+                        "title": "Post title",
+                        "created_utc": 1700000500,
+                        "permalink": "/r/example/comments/pq1/post_title/",
+                    }
+                }
+            ],
+            "after": None,
+        }
+    }
+
+    post_json = [
+        {
+            "data": {
+                "children": [
+                    {
+                        "data": {
+                            "id": "pq1",
+                            "title": "Post title",
+                            "created_utc": 1700000500,
+                            "permalink": "/r/example/comments/pq1/post_title/",
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "data": {"children": []}
+        },
+    ]
+
+    cached_path = posts_dir / "001_pq1_cached.json"
+    cached_path.write_text(json.dumps(post_json), encoding="utf-8")
+
+    responses = [listing_json]
+
+    def fake_fetch_json(session, url, *, params=None, retries=3, backoff=1.0):  # noqa: D401
+        assert responses, "Unexpected additional fetch call"
+        return responses.pop(0)
+
+    monkeypatch.setattr(core, "fetch_json", fake_fetch_json)
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(core.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    options = ScrapeOptions(
+        output_root=tmp_path,
+        listing_limit=10,
+        comment_limit=250,
+        delay=1.0,
+        time_filter="day",
+        output_formats={"json"},
+        fetch_comments=True,
+        resume=True,
+    )
+
+    core.process_listing(target, session=object(), options=options)
+
+    assert responses == []
+    # Only the post delay should run (no rate limit waits, no fetch delays)
+    assert sleeps == []
+
+
+def test_process_listing_rate_limit_retries(tmp_path: Path, monkeypatch) -> None:
+    subreddit = "example"
+    target = ListingTarget(
+        label="r/example hot",
+        output_segments=("subreddits", "example", "hot"),
+        url=f"{BASE_URL}/r/{subreddit}/hot/.json",
+        context=subreddit,
+    )
+
+    base_dir = target.output_dir(tmp_path)
+    (base_dir / "post_jsons").mkdir(parents=True)
+
+    listing_json = {
+        "data": {
+            "children": [
+                {
+                    "data": {
+                        "id": "pq1",
+                        "title": "Post title",
+                        "created_utc": 1700000500,
+                        "permalink": "/r/example/comments/pq1/post_title/",
+                    }
+                }
+            ],
+            "after": None,
+        }
+    }
+
+    post_json = [
+        {
+            "data": {
+                "children": [
+                    {
+                        "data": {
+                            "id": "pq1",
+                            "title": "Post title",
+                            "created_utc": 1700000500,
+                            "permalink": "/r/example/comments/pq1/post_title/",
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "data": {"children": []}
+        },
+    ]
+
+    call_state = {"count": 0}
+
+    def fake_fetch_json(session, url, *, params=None, retries=3, backoff=1.0):  # noqa: D401
+        if "hot" in url and call_state["count"] == 0:
+            call_state["count"] += 1
+            return listing_json
+        # Subsequent calls are for the post JSON
+        post_call = call_state.setdefault("post_calls", 0)
+        if post_call == 0:
+            call_state["post_calls"] = 1
+            raise RuntimeError("HTTP 429 Too Many Requests")
+        if post_call == 1:
+            call_state["post_calls"] = 2
+            raise RuntimeError("429 second wave")
+        return post_json
+
+    monkeypatch.setattr(core, "fetch_json", fake_fetch_json)
+
+    sleeps: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(core.time, "sleep", fake_sleep)
+
+    options = ScrapeOptions(
+        output_root=tmp_path,
+        listing_limit=10,
+        comment_limit=250,
+        delay=0.1,
+        time_filter="day",
+        output_formats={"json"},
+        fetch_comments=True,
+    )
+
+    core.process_listing(target, session=object(), options=options)
+
+    # First rate limit should wait 60s, second should wait 120s before succeeding
+    assert sleeps[:2] == [60, 120]

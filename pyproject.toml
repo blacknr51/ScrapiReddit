@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scrapi-reddit"
+version = "0.1.0"
+description = "Zero-auth Reddit scraper CLI and library"
+readme = "README.md"
+authors = [{ name = "Rodney Keilson" }]
+license = "MIT"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.urls]
+Homepage = "https://github.com/rodneykeilson/ScrapiReddit"
+
+[project.scripts]
+scrapi-reddit = "scrapi_reddit.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["scrapi_reddit*"]

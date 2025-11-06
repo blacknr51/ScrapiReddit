@@ -1,108 +1,120 @@
 # Scrapi Reddit
 
-Scrapi Reddit is a zero-auth scraper for public Reddit listings. Use it as a Python package or via the bundled CLI to collect posts (and optional flattened CSV summaries) from subreddits, the front page, r/popular, r/all, user profiles, or any arbitrary Reddit listing URL.
+Scrapi Reddit is a zero-auth toolkit for scraping public Reddit listings. Use the CLI for quick data pulls or import the library to integrate pagination, comment harvesting, and CSV exports into your own workflows. This scraper fetches data from Reddit's Public API and does not require any API key.
+
+## Features
+- Scrape subreddit listings, the front page, r/popular (geo-aware), r/all, user activity, or custom listing URLs without OAuth.
+- Toggle comment collection per post with resumable runs that reuse cached JSON and persist to CSV.
+- Target individual posts to download full comment trees on demand.
+- Automatic pagination, exponential backoff for rate limits, and structured logging with adjustable verbosity.
+- Save outputs as JSON and optionally flatten posts/comments into CSV for downstream analysis.
+- Configurable CLI plus Python API for scripting and integration.
+
+## Important Notes
+- Respect Reddit's [User Agreement](https://www.redditinc.com/policies/user-agreement) and local laws. Scraped data may have legal or ethical constraints.
+- Heavy scraping can trigger rate limits or temporary IP bans. Provide a descriptive User-Agent and keep delays reasonable (I recommend 3 or 4 seconds delay).
+
+## Dependencies
+- Python 3.9+
+- `requests` (runtime)
+- `pytest` (tests, optional)
 
 ## Installation
-
 ```bash
-pip install -e .
+pip install scrapi-reddit
 ```
+After installation the console entry point `scrapi-reddit` is available on your PATH.
 
-## CLI Usage
-
+## Quick Start (CLI)
 ```bash
-python scrapi-reddit.py [subreddits ...] [options]
+scrapi-reddit python --limit 200 --fetch-comments --output-format both
 ```
+This command downloads up to 200 posts from r/python, fetches comments (up to 500 per post), and writes JSON + CSV outputs under `./scrapi_reddit_data`.
 
-Common scenarios:
+### Common CLI Options
+- `--fetch-comments` Enable post-level comment requests (defaults off).
+- `--comment-limit 0` Request the maximum 500 comments per post.
+- `--continue` Resume a previous run by reusing cached post JSON files.
+- `--popular --popular-geo <region-code>` Pull popular listings with geo filters.
+- `--user <name>` Scrape user overview/submitted/comments sections.
 
-- Subreddits with multiple sorts/timeframes:
-	```powershell
-	python scrapi-reddit.py python MobileLegendsGame --subreddit-sorts top,best,hot,new,rising --subreddit-top-times hour,day,week,month,year,all --output-format both
-	```
-	- Paginated subreddit grab (fetch 1000 posts total):
-		```powershell
-		python scrapi-reddit.py python --limit 1000
-		```
-- Popular listings including geo filters:
-	```powershell
-	python scrapi-reddit.py --popular --popular-geo us,ar,au,de,jp
-	```
-- Front page and r/all:
-	```powershell
-	python scrapi-reddit.py --frontpage --include-r-all --limit 50
-	```
-- User activity (overview, submissions, comments):
-	```powershell
-	python scrapi-reddit.py --user CockyNobody_27 --user-sections overview,submitted,comments --user-sorts new,hot,top --limit 100
-	```
-- Direct listing URLs:
-	```powershell
-	python scrapi-reddit.py --listing-url https://www.reddit.com/r/popular/best/.json?geo_filter=gb --listing-url https://www.reddit.com/r/all/.json
-	```
-- Opt-in comment fetching for listing runs:
-	```powershell
-	python scrapi-reddit.py python --fetch-comments --comment-limit 100 --output-format both
-	```
-- Single post (including full comment tree):
-	```powershell
-	python scrapi-reddit.py --post-url https://www.reddit.com/r/python/comments/xyz789/example_post/
-	```
-- Resume a long scrape after interruption:
-	```powershell
-	python scrapi-reddit.py python --fetch-comments --continue --output-format both
-	```
-
-Artifacts now default to `./scrapi_reddit_data` (or the path in `SCRAPI_REDDIT_OUTPUT_DIR`). Override with `--output-dir` if you prefer another location. Set `--output-format both` to persist CSV summaries alongside the raw JSON.
-
-`--limit` controls the total number of posts fetched per listing (defaults to 100, set `--limit 0` to fetch until the listing exhausts its `after` cursor). Comment requests default to `--comment-limit 250` (max 500 per fetch); pass `--comment-limit 0` to use the maximum automatically. Comments are only fetched when `--fetch-comments` or `--post-url` is provided, keeping the scraper lightweight by default.
+### Advanced CLI Examples
+Fetch multiple subreddits with varied sorts and time windows:
+```powershell
+scrapi-reddit python typescript --subreddit-sorts top,hot --subreddit-top-times day,all --limit 500 --output-format both
+```
+Resume a long run after interruption:
+```powershell
+scrapi-reddit python --fetch-comments --continue --limit 1000 --log-level INFO
+```
+Download a single post (JSON + CSV):
+```powershell
+scrapi-reddit --post-url https://www.reddit.com/r/python/comments/xyz789/example_post/
+```
 
 ## Python API
+Import the library when you need finer control inside Python scripts.
 
+### Step 1 – Configure a session
+```python
+from scrapi_reddit import build_session
+
+session = build_session("your-app-name/0.1", verify=True)
+```
+
+### Step 2 – Define scrape options
 ```python
 from pathlib import Path
+from scrapi_reddit import ScrapeOptions
 
-from scrapi_reddit import (
-		ListingTarget,
-		PostTarget,
-		ScrapeOptions,
-		build_session,
-		process_listing,
-		process_post,
-)
-
-session = build_session("my-user-agent", verify=True)
 options = ScrapeOptions(
-		output_root=Path("./data"),
-		listing_limit=100,
-		comment_limit=200,
-		delay=2.0,
-		time_filter="day",
-		output_formats={"json", "csv"},
-		resume=False,
+    output_root=Path("./scrapes"),
+    listing_limit=250,
+    comment_limit=0,      # auto-expand to 500
+    delay=3.0,
+    time_filter="day",
+    output_formats={"json", "csv"},
+    fetch_comments=True,
+    resume=True,
 )
+```
+
+### Step 3 – Scrape a listing
+```python
+from scrapi_reddit import ListingTarget, process_listing
 
 target = ListingTarget(
-		label="r/python top (day)",
-		output_segments=("subreddits", "python", "top_day"),
-		url="https://www.reddit.com/r/python/top/.json",
-		params={"t": "day"},
-		context="python",
+    label="r/python top (day)",
+    output_segments=("subreddits", "python", "top_day"),
+    url="https://www.reddit.com/r/python/top/.json",
+    params={"t": "day"},
+    context="python",
 )
 
 process_listing(target, session=session, options=options)
+```
+
+### Step 4 – Scrape a single post
+```python
+from scrapi_reddit import PostTarget, process_post
 
 post_target = PostTarget(
-	label="example post",
-	output_segments=("posts", "python", "xyz789"),
-	url="https://www.reddit.com/r/python/comments/xyz789/example_post/.json",
+    label="Example post",
+    output_segments=("posts", "python", "xyz789"),
+    url="https://www.reddit.com/r/python/comments/xyz789/example_post/.json",
 )
 
 process_post(post_target, session=session, options=options)
 ```
+Both helpers write JSON/CSV to the configured output directory and emit progress via logging.
 
 ## Testing
-
 ```bash
 python -m pytest
 ```
+
+## Contributing
+Bug reports and pull requests are welcome. For feature requests or questions, please open an issue. When contributing, add tests that cover new behavior and ensure `python -m pytest` passes before submitting a PR.
+
+## License
+Released under the [MIT License](LICENSE). You may use, modify, and distribute this project with attribution and a copy of the license. Use at your own risk.
