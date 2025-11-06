@@ -55,7 +55,7 @@ Common scenarios:
 
 Artifacts now default to `./scrapi_reddit_data` (or the path in `SCRAPI_REDDIT_OUTPUT_DIR`). Override with `--output-dir` if you prefer another location. Set `--output-format both` to persist CSV summaries alongside the raw JSON.
 
-`--limit` controls the total number of posts fetched per listing (defaults to 100, set `--limit 0` to fetch until the listing exhausts its `after` cursor). Comment requests default to `--comment-limit 250` (max 500 per fetch) and only run when `--fetch-comments` or `--post-url` is provided, keeping the scraper lightweight by default.
+`--limit` controls the total number of posts fetched per listing (defaults to 100, set `--limit 0` to fetch until the listing exhausts its `after` cursor). Comment requests default to `--comment-limit 250` (max 500 per fetch); pass `--comment-limit 0` to use the maximum automatically. Comments are only fetched when `--fetch-comments` or `--post-url` is provided, keeping the scraper lightweight by default.
 
 ## Python API
 

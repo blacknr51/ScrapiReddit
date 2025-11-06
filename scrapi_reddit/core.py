@@ -45,7 +45,10 @@ class ScrapeOptions:
                 self.listing_limit = None
             else:
                 self.listing_limit = max(1, self.listing_limit)
-        self.comment_limit = max(1, min(self.comment_limit, MAX_COMMENT_LIMIT))
+        if self.comment_limit <= 0:
+            self.comment_limit = MAX_COMMENT_LIMIT
+        else:
+            self.comment_limit = max(1, min(self.comment_limit, MAX_COMMENT_LIMIT))
         self.delay = max(self.delay, MIN_DELAY_SECONDS)
         self.output_formats = set(self.output_formats)
         if self.time_filter not in {"hour", "day", "week", "month", "year", "all"}:
