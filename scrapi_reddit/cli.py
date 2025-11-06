@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, urlsplit
 from .core import (
     BASE_URL,
     DEFAULT_USER_AGENT,
+    build_search_target,
     ListingTarget,
     PostTarget,
     ScrapeOptions,
@@ -386,6 +387,63 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--search",
+        dest="search_queries",
+        action="append",
+        default=[],
+        help="Search query string to fetch from search.json. Provide multiple times for multiple queries.",
+    )
+    parser.add_argument(
+        "--search-types",
+        default=None,
+        help=(
+            "Comma-separated search result types to request (choices: post, link, comment, sr, user, media)."
+        ),
+    )
+    parser.add_argument(
+        "--search-sort",
+        default="relevance",
+        choices=["relevance", "hot", "top", "new", "comments"],
+        help="Sort order for search results (default: relevance).",
+    )
+    parser.add_argument(
+        "--search-time",
+        default="all",
+        choices=["all", "day", "week", "month", "year"],
+        help="Time filter for search results (default: all).",
+    )
+    parser.add_argument(
+        "--search-subreddit",
+        default=None,
+        help="Limit search to a specific subreddit (name without the r/ prefix).",
+    )
+    parser.add_argument(
+        "--search-restrict-sr",
+        action="store_true",
+        help="Force restrict_sr=on when using --search-subreddit to stay inside that community.",
+    )
+    parser.add_argument(
+        "--search-include-over-18",
+        action="store_true",
+        help="Include results flagged as over_18 (NSFW).",
+    )
+    parser.add_argument(
+        "--search-limit",
+        type=int,
+        default=100,
+        help="Maximum results per search request (1-100, default: 100).",
+    )
+    parser.add_argument(
+        "--search-after",
+        default=None,
+        help="After cursor for resuming a search (optional).",
+    )
+    parser.add_argument(
+        "--search-before",
+        default=None,
+        help="Before cursor for reverse pagination of a search (optional).",
+    )
+    parser.add_argument(
         "--insecure",
         action="store_true",
         help="Disable TLS certificate verification (only if you trust the network).",
@@ -553,6 +611,37 @@ def main(argv: Sequence[str] | None = None) -> None:
     user_sections = _parse_csv(args.user_sections)
     user_sorts = _parse_csv(args.user_sorts)
 
+    if args.search_restrict_sr and not args.search_subreddit:
+        raise SystemExit("--search-restrict-sr requires --search-subreddit")
+
+    search_targets: List[ListingTarget] = []
+    search_queries = [query.strip() for query in args.search_queries if query and query.strip()]
+    if search_queries:
+        search_types = _parse_csv(args.search_types, default="link")
+        search_limit = args.search_limit
+        if search_limit is not None:
+            if search_limit <= 0:
+                raise SystemExit("--search-limit must be greater than 0")
+            search_limit = max(1, min(search_limit, 100))
+
+        for query in search_queries:
+            try:
+                target = build_search_target(
+                    query,
+                    search_types=search_types if search_types else None,
+                    sort=args.search_sort,
+                    time_filter=args.search_time,
+                    subreddit=args.search_subreddit,
+                    restrict_to_subreddit=args.search_restrict_sr if args.search_subreddit else None,
+                    include_over_18=args.search_include_over_18,
+                    limit=search_limit,
+                    after=args.search_after,
+                    before=args.search_before,
+                )
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
+            search_targets.append(target)
+
     listing_targets = _build_targets(
         subreddits,
         subreddit_sorts=subreddit_sorts,
@@ -569,6 +658,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         user_sorts=user_sorts,
         listing_urls=args.listing_url,
     )
+
+    listing_targets.extend(search_targets)
 
     post_urls = [url.strip() for url in args.post_url if url and url.strip()]
     post_targets = [_post_target_from_url(url) for url in post_urls]

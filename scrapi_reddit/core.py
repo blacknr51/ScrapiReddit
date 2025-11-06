@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from html import unescape
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Sequence
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -66,6 +66,10 @@ STATIC_IMAGE_EXTENSIONS = {
 }
 
 MEDIA_FILTER_CATEGORIES = {"video", "image", "animated"}
+
+SEARCH_SORT_OPTIONS = {"relevance", "hot", "top", "new", "comments"}
+SEARCH_TIME_FILTERS = {"all", "day", "week", "month", "year"}
+SEARCH_TYPE_OPTIONS = {"link", "post", "comment", "sr", "user", "media"}
 
 CONTENT_TYPE_EXTENSION_MAP = {
     "image/jpeg": ".jpg",
@@ -154,6 +158,146 @@ class PostTarget:
 
     def output_dir(self, root: Path) -> Path:
         return root.joinpath(*self.output_segments)
+
+
+def build_search_target(
+    query: str,
+    *,
+    search_types: Sequence[str] | None = None,
+    sort: str = "relevance",
+    time_filter: str = "all",
+    subreddit: str | None = None,
+    restrict_to_subreddit: bool | None = None,
+    include_over_18: bool = False,
+    limit: int | None = LISTING_PAGE_SIZE,
+    after: str | None = None,
+    before: str | None = None,
+    label: str | None = None,
+) -> ListingTarget:
+    """Create a listing target for Reddit's public search endpoint.
+
+    Parameters align with Reddit's `search.json` query string, providing sane
+    defaults (e.g. 100 results per page) while validating supported values.
+    """
+
+    if not query or not query.strip():
+        raise ValueError("Search query must be a non-empty string")
+
+    normalized_query = query.strip()
+
+    normalized_sort = sort.strip().lower()
+    if normalized_sort not in SEARCH_SORT_OPTIONS:
+        allowed = ", ".join(sorted(SEARCH_SORT_OPTIONS))
+        raise ValueError(f"Unsupported search sort '{sort}'. Allowed: {allowed}")
+
+    normalized_time = time_filter.strip().lower()
+    if normalized_time not in SEARCH_TIME_FILTERS:
+        allowed = ", ".join(sorted(SEARCH_TIME_FILTERS))
+        raise ValueError(f"Unsupported search time filter '{time_filter}'. Allowed: {allowed}")
+
+    normalized_types: list[str] = []
+    skip_all_types = False
+    if search_types:
+        for raw in search_types:
+            token = (raw or "").strip().lower()
+            if not token:
+                continue
+            if token == "posts":
+                token = "post"
+            if token == "links":
+                token = "link"
+            if token == "post":
+                token = "link"
+            if token in {"all", "any", "*"}:
+                skip_all_types = True
+                break
+            if token not in SEARCH_TYPE_OPTIONS:
+                allowed = ", ".join(sorted(SEARCH_TYPE_OPTIONS))
+                raise ValueError(f"Unsupported search type '{raw}'. Allowed: {allowed}")
+            if token not in normalized_types:
+                normalized_types.append(token)
+    if skip_all_types:
+        normalized_types = []
+
+    normalized_subreddit: str | None = None
+    if subreddit:
+        stripped = subreddit.strip()
+        if stripped.lower().startswith("r/"):
+            stripped = stripped[2:]
+        stripped = stripped.strip(" /")
+        if not stripped:
+            raise ValueError("Subreddit name cannot be empty after removing prefixes")
+        normalized_subreddit = stripped
+
+    if limit is not None:
+        if limit <= 0:
+            raise ValueError("Search limit must be greater than zero when provided")
+        limit = max(1, min(int(limit), LISTING_PAGE_SIZE))
+
+    restrict_flag = restrict_to_subreddit
+    if restrict_flag is None:
+        restrict_flag = bool(normalized_subreddit)
+
+    if normalized_subreddit:
+        url = f"{BASE_URL}/r/{normalized_subreddit}/search.json"
+        context = f"r/{normalized_subreddit}"
+    else:
+        url = f"{BASE_URL}/search.json"
+        context = "search"
+
+    params: dict[str, Any] = {"q": normalized_query, "sort": normalized_sort, "t": normalized_time}
+    if normalized_types:
+        params["type"] = ",".join(normalized_types)
+    if restrict_flag:
+        params["restrict_sr"] = "on"
+    if include_over_18:
+        params["include_over_18"] = "on"
+    if limit is not None:
+        params["limit"] = limit
+    if after:
+        params["after"] = after
+    if before:
+        params["before"] = before
+
+    display_types = ["post" if typ == "link" else typ for typ in normalized_types]
+
+    if label is None:
+        label_bits: list[str] = ["search"]
+        if normalized_subreddit:
+            label_bits.append(f"r/{normalized_subreddit}")
+        label_bits.append(f"q='{normalized_query}'")
+        if display_types:
+            label_bits.append(f"type={','.join(display_types)}")
+        label_bits.append(f"sort={normalized_sort}")
+        if normalized_time != "all":
+            label_bits.append(f"t={normalized_time}")
+        label = " ".join(label_bits)
+
+    def _slug_component(value: str, fallback: str, max_length: int = 80) -> str:
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip().lower())
+        slug = slug.strip("_")
+        if not slug:
+            slug = fallback
+        return shorten_component(slug, max_length)
+
+    segments: list[str] = ["search"]
+    if normalized_subreddit:
+        segments.append(_slug_component(normalized_subreddit, "subreddit", 40))
+    segments.append(_slug_component(normalized_query, "query", 80))
+    if normalized_types:
+        segments.append(_slug_component("-".join(normalized_types), "types", 40))
+    if normalized_sort != "relevance":
+        segments.append(f"sort_{_slug_component(normalized_sort, 'sort', 20)}")
+    if normalized_time != "all":
+        segments.append(f"t_{_slug_component(normalized_time, 'time', 20)}")
+
+    return ListingTarget(
+        label=label,
+        output_segments=tuple(segments),
+        url=url,
+        params=params,
+        context=context,
+    )
 
 
 def _determine_page_limit(
@@ -1551,6 +1695,7 @@ def process_post(
 __all__ = [
     "BASE_URL",
     "DEFAULT_USER_AGENT",
+    "build_search_target",
     "ListingTarget",
     "PostTarget",
     "ScrapeOptions",

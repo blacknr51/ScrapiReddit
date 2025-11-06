@@ -10,6 +10,7 @@ import requests
 import scrapi_reddit.core as core
 from scrapi_reddit.core import (
     BASE_URL,
+    build_search_target,
     ListingTarget,
     ScrapeOptions,
     derive_filename,
@@ -57,6 +58,47 @@ def test_derive_filename_includes_rank_and_slug():
     assert filename.startswith("005_")
     assert filename.endswith(".json")
     assert "A_neat_post" in filename
+
+
+def test_build_search_target_scopes_and_normalizes_parameters():
+    target = build_search_target(
+        "python scraping",
+        search_types=["post", "comment"],
+        sort="top",
+        time_filter="day",
+        subreddit="learnpython",
+        restrict_to_subreddit=True,
+        include_over_18=True,
+        limit=80,
+        after="t3_example",
+    )
+
+    assert target.url == f"{BASE_URL}/r/learnpython/search.json"
+    assert target.context == "r/learnpython"
+    assert target.output_segments[0] == "search"
+
+    params = target.params
+    assert params["q"] == "python scraping"
+    assert params["type"] == "link,comment"
+    assert params["sort"] == "top"
+    assert params["t"] == "day"
+    assert params["limit"] == 80
+    assert params["restrict_sr"] == "on"
+    assert params["include_over_18"] == "on"
+    assert params["after"] == "t3_example"
+
+
+def test_build_search_target_rejects_invalid_type():
+    with pytest.raises(ValueError):
+        build_search_target("python", search_types=["invalid"])
+
+
+def test_build_search_target_supports_all_type_keyword():
+    target = build_search_target("asyncio", search_types=["all"], sort="hot")
+
+    assert target.url == f"{BASE_URL}/search.json"
+    assert "type" not in target.params
+    assert target.params["sort"] == "hot"
 
 
 def test_rebuild_csv_from_cache(tmp_path: Path):

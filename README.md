@@ -3,14 +3,15 @@
 Scrapi Reddit is a zero-auth toolkit for scraping public Reddit listings. Use the CLI for quick data pulls or import the library to integrate pagination, comment harvesting, and CSV exports into your own workflows. This scraper fetches data from Reddit's Public API and does not require any API key.
 
 ## Features
-- Scrape subreddit posts (with their comments), the front page, r/popular (geo-aware), r/all, user activity, or custom listing URLs without OAuth.
-- Toggle comment collection per post with resumable runs that reuse cached JSON and persist to CSV.
-- Target individual posts to download full comment trees on demand.
-- Automatic pagination, exponential backoff for rate limits, and structured logging with adjustable verbosity.
-- Optional media capture downloads linked images, GIFs, and videos alongside post metadata.
-- Media filters let you keep only the assets you need (e.g., videos only or static images only).
-- Save outputs as JSON and optionally flatten posts/comments into CSV for downstream analysis.
-- Configurable CLI plus Python API for scripting and integration.
+- **Listing coverage:** Scrape subreddit posts (with their comments), the front page, r/popular (geo-aware), r/all, user activity, or custom listing URLs without OAuth.
+- **Search mode:** Run keyword searches (site-wide or scoped to a subreddit) with custom type filters, sort orders, and time windows.
+- **Comment controls:** Toggle comment collection per post with resumable runs that reuse cached JSON and persist to CSV.
+- **Post deep dives:** Target individual posts to download full comment trees on demand.
+- **Resilient fetching:** Automatic pagination, exponential backoff for rate limits, and structured logging with adjustable verbosity.
+- **Media archiving:** Optional media capture downloads linked images, GIFs, and videos alongside post metadata.
+- **Media filters:** Media filters let you keep only the assets you need (e.g., videos only or static images only).
+- **Flexible exports:** Save outputs as JSON and optionally flatten posts/comments into CSV for downstream analysis.
+- **Scriptable tooling:** Configurable CLI plus Python API for scripting and integration.
 
 ## Important Notes
 - Respect Reddit's [User Agreement](https://www.redditinc.com/policies/user-agreement) and local laws. Scraped data may have legal or ethical constraints.
@@ -37,15 +38,16 @@ This command downloads up to 200 posts from r/python, fetches comments (up to 50
 - `--fetch-comments` Enable post-level comment requests (defaults off).
 - `--comment-limit 0` Request the maximum 500 comments per post.
 - `--continue` Resume a previous run by reusing cached post JSON files and skipping previously downloaded media.
-- `--media-filter video,gif` Restrict downloads to specific categories or extensions (`video`, `image`, `animated`, `audio`, or extensions such as `mp4`, `jpg`, `gif`).
+- `--media-filter video,gif` Restrict downloads to specific categories or extensions (`video`, `image`, `animated`, or extensions such as `mp4`, `jpg`, `gif`).
+- `--search "python asyncio" --search-types post,comment --search-sort top --search-time week` Query Reddit search.json with flexible filters (types: post/link, comment, sr, user, media).
 - `--download-media` Save linked images/GIFs/videos under each target's media directory.
 - `--popular --popular-geo <region-code>` Pull popular listings with geo filters.
 - `--user <name>` Scrape user overview/submitted/comments sections.
 
 ### Advanced CLI Examples
-Fetch multiple subreddits with varied sorts and time windows:
+Fetch multiple subreddits with varied sorts and time windows, downloading all fetched media:
 ```powershell
-scrapi-reddit python typescript --subreddit-sorts top,hot --subreddit-top-times day,all --limit 500 --output-format both
+scrapi-reddit python typescript --subreddit-sorts top,hot --subreddit-top-times day,all --limit 500 --output-format both --download-media
 ```
 Resume a long run after interruption:
 ```powershell
@@ -54,6 +56,10 @@ scrapi-reddit python --fetch-comments --continue --limit 1000 --log-level INFO
 Download a single post (JSON + CSV):
 ```powershell
 scrapi-reddit --post-url https://www.reddit.com/r/python/comments/xyz789/example_post/
+```
+Fetch top search results with the keyword "python asyncio", including the comments for each fetched post and download all media:
+```powershell
+scrapi-reddit --search "python asyncio" --search-types post,comment --search-sort top --search-time week --limit 200 --output-format both --fetch-comments --download-media
 ```
 
 ## Python API
@@ -85,9 +91,9 @@ options = ScrapeOptions(
 )
 ```
 
-### Step 3 – Scrape a listing
+### Step 3 – Scrape a listing or search
 ```python
-from scrapi_reddit import ListingTarget, process_listing
+from scrapi_reddit import ListingTarget, build_search_target, process_listing
 
 target = ListingTarget(
     label="r/python top (day)",
@@ -98,6 +104,15 @@ target = ListingTarget(
 )
 
 process_listing(target, session=session, options=options)
+
+search_target = build_search_target(
+    "python asyncio",
+    search_types=["comment"],
+    sort="new",
+    time_filter="day",
+)
+
+process_listing(search_target, session=session, options=options)
 ```
 
 ### Step 4 – Scrape a single post
